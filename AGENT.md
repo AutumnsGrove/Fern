@@ -5,17 +5,16 @@
 ---
 
 ## Project Purpose
-[Fill in: What this project does - 1-2 sentences]
+Fern is a voice training feedback companion that hooks into your existing dictation workflow. It listens when you speak, shows you what your voice is doing, and helps you grow toward the voice you want. No dedicated practice sessions required.
 
 ## Tech Stack
-[Fill in: Technologies, frameworks, and languages used]
-- Language:
-- Framework:
-- Key Libraries:
-- Package Manager:
+- Language: Python 3.11+
+- Framework: Typer for CLI, Hammerspoon for GUI
+- Key Libraries: sounddevice, librosa, praat-parselmouth, numpy, matplotlib, rich
+- Package Manager: UV (Python)
 
 ## Architecture Notes
-[Fill in: Key architectural decisions, patterns, or structure]
+Two-layer architecture: Python backend for audio capture, pitch/resonance analysis, and SQLite storage; Hammerspoon (Lua) GUI layer for global hotkey detection, live overlay, and chart display. Data stored in ~/.fern/ with rolling audio clips and quarterly archives.
 
 ---
 

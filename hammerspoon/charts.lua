@@ -1,0 +1,2 @@
+-- Historical chart display
+-- View pitch and resonance trends over time

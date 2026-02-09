@@ -1,0 +1,2 @@
+-- Live overlay display
+-- Real-time pitch and resonance visualization

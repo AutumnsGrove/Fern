@@ -1,18 +1,88 @@
-# TODOs for BaseProject
+# Fern - Task List
 
-## Setup Tasks
-- [ ] Review and customize AGENT.md with project-specific details
-- [ ] Set up project dependencies (uv, pnpm, go mod, etc.)
-- [ ] Configure secrets if needed (see AgentUsage/secrets_management.md)
-- [ ] Set up pre-commit hooks (optional, see AgentUsage/pre_commit_hooks/)
-- [ ] Add initial project structure
+## Phase 1: Foundation
 
-## Development Tasks
-- [ ] Define core features
-- [ ] Set up testing framework
-- [ ] Implement first feature
+Goal: Basic pitch detection from microphone
 
-## Documentation Tasks
-- [ ] Update README.md with project specifics
-- [ ] Document API/architecture decisions
-- [ ] Add usage examples
+- [ ] Set up UV project with pyproject.toml
+- [ ] Install core dependencies (sounddevice, librosa, praat-parselmouth, numpy)
+- [ ] Create basic pitch detection script (`scripts/test_pitch.py`)
+  - Capture 5 seconds of audio from microphone
+  - Extract fundamental frequency using praat-parselmouth
+  - Print median pitch to console
+- [ ] Verify audio capture works on macOS
+- [ ] Add CLI entry point (`fern` command using Typer)
+- [ ] Create tests/ directory with initial test structure
+
+## Phase 2: Data Layer
+
+- [ ] Implement SQLite schema in `db.py`
+  - sessions table
+  - readings table
+  - targets table
+  - config table
+- [ ] Create data models in `models.py`
+- [ ] Implement audio clip storage in `~/.fern/clips/`
+- [ ] Add rolling archive logic (keep 30 most recent clips)
+
+## Phase 3: Core Analysis
+
+- [ ] Implement `capture.py` with callback-based audio capture
+- [ ] Implement `analysis.py` with pitch extraction
+- [ ] Implement resonance analysis using librosa
+- [ ] Create Session/Reading lifecycle management
+- [ ] Add basic CLI commands: `fern status`, `fern trend`
+
+## Phase 4: Hammerspoon Integration
+
+- [ ] Create `websocket_server.py` for IPC
+- [ ] Implement `hammerspoon/init.lua` with hotkey detection
+- [ ] Add signal file communication (`/tmp/fern_capture_active`)
+- [ ] Create `hammerspoon/overlay.lua` for live display
+- [ ] Test Python/Hammerspoon communication
+
+## Phase 5: CLI Polish
+
+- [ ] Add Rich terminal formatting
+- [ ] Implement `fern config set-target` command
+- [ ] Add `fern review <session-id>` command
+- [ ] Create sparkline visualizations for trends
+- [ ] Add export functionality (CSV, JSON)
+
+## Phase 6: Charts
+
+- [ ] Implement `hammerspoon/charts.lua`
+- [ ] Add historical trend visualization
+- [ ] Create target range indicators on charts
+- [ ] Add keyboard navigation for chart view
+
+## Phase 7: Installation & Packaging
+
+- [ ] Create install script
+- [ ] Add Hammerspoon config setup instructions
+- [ ] Create Homebrew formula (optional)
+- [ ] Write comprehensive README documentation
+- [ ] Add LICENSE file
+
+## Phase 8: v1.0 Polish
+
+- [ ] Add comprehensive error handling
+- [ ] Implement logging system
+- [ ] Create test suite with pytest
+- [ ] Add type hints throughout
+- [ ] Performance optimization
+
+## Phase 9: Guided Exercises (v1.5)
+
+- [ ] Design exercise data model
+- [ ] Create pitch glide exercise
+- [ ] Add resonance shifting exercise
+- [ ] Implement exercise progress tracking
+- [ ] Add exercise recommendations based on trends
+
+---
+
+## Notes
+
+- See [Fern-Spec.md](Fern-Spec.md) for complete technical specification
+- Repository: https://github.com/autumnsgrove/fern
