@@ -249,3 +249,39 @@ def get_audio_parameters(config: Dict[str, Any]) -> Dict[str, Any]:
         "channels": config["audio"]["channels"],
         "device": config["audio"]["device"]
     }
+
+
+def set_target(config: Dict[str, Any], min_pitch: float, max_pitch: float) -> Dict[str, Any]:
+    """Set the target pitch range.
+
+    Args:
+        config: Full configuration dictionary.
+        min_pitch: Minimum target pitch in Hz.
+        max_pitch: Maximum target pitch in Hz.
+
+    Returns:
+        Updated configuration dictionary.
+    """
+    if min_pitch >= max_pitch:
+        raise InvalidConfigError("min_pitch must be less than max_pitch")
+    if min_pitch < 50 or max_pitch > 500:
+        raise InvalidConfigError("Target pitch range should be between 50-500 Hz")
+
+    config["target_pitch_range"]["min"] = min_pitch
+    config["target_pitch_range"]["max"] = max_pitch
+    return config
+
+
+def get_target(config: Dict[str, Any]) -> Dict[str, float]:
+    """Get the current target pitch range.
+
+    Args:
+        config: Full configuration dictionary.
+
+    Returns:
+        Dictionary with 'min' and 'max' target values.
+    """
+    return {
+        "min": config["target_pitch_range"]["min"],
+        "max": config["target_pitch_range"]["max"]
+    }

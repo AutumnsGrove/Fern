@@ -35,19 +35,21 @@ Goal: Basic pitch detection from microphone
 
 ## Phase 4: Hammerspoon Integration
 
-- [ ] Create `websocket_server.py` for IPC
-- [ ] Implement `hammerspoon/init.lua` with hotkey detection
-- [ ] Add signal file communication (`/tmp/fern_capture_active`)
-- [ ] Create `hammerspoon/overlay.lua` for live display
-- [ ] Test Python/Hammerspoon communication
+- [x] Create `websocket_server.py` for IPC
+- [x] Implement `hammerspoon/init.lua` with hotkey detection
+- [x] Add signal file communication (`/tmp/fern_capture_active`)
+- [x] Create `hammerspoon/overlay.lua` for live display
+- [x] Create `hammerspoon/charts.lua` for trend visualization
 
 ## Phase 5: CLI Polish
 
-- [ ] Add Rich terminal formatting
-- [ ] Implement `fern config set-target` command
-- [ ] Add `fern review <session-id>` command
-- [ ] Create sparkline visualizations for trends
-- [ ] Add export functionality (CSV, JSON)
+- [x] Add Rich terminal formatting
+- [x] Implement `fern config set-target` command
+- [x] Add `fern review <session-id>` command
+- [x] Add `fern sessions` command
+- [x] Create sparkline visualizations for trends
+- [x] Add export functionality (CSV, JSON)
+- [x] Add `fern config:show` command
 
 ## Phase 6: Charts
 

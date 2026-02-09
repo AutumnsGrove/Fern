@@ -23,9 +23,12 @@ class TestCLICommands:
             from pathlib import Path
             mock_home.return_value = Path("/mock/home")
             with patch("pathlib.Path.exists", return_value=True):
-                result = cli_runner.invoke(app, ["status"])
+                with patch("fern.db.get_default_db") as mock_db:
+                    mock_db.return_value.list_sessions.return_value = []
+                    mock_db.return_value.get_recent_readings.return_value = []
+                    result = cli_runner.invoke(app, ["status"])
 
-                assert result.exit_code == 0
+                    assert result.exit_code == 0
 
     def test_status_command_data_directory_missing(self, cli_runner):
         """Test status command when data directory doesn't exist."""
@@ -33,9 +36,12 @@ class TestCLICommands:
             from pathlib import Path
             mock_home.return_value = Path("/mock/home")
             with patch("pathlib.Path.exists", return_value=False):
-                result = cli_runner.invoke(app, ["status"])
+                with patch("fern.db.get_default_db") as mock_db:
+                    mock_db.return_value.list_sessions.return_value = []
+                    mock_db.return_value.get_recent_readings.return_value = []
+                    result = cli_runner.invoke(app, ["status"])
 
-                assert result.exit_code == 0
+                    assert result.exit_code == 0
 
     def test_version_command(self, cli_runner):
         """Test the version command displays correctly."""

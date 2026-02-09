@@ -7,6 +7,14 @@ from typing import Optional
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich.align import Align
+from rich.box import ROUNDED
+from rich import print as rprint
+from datetime import datetime
+import csv
+import json
 
 app = typer.Typer(
     name="fern",
@@ -17,89 +25,274 @@ app = typer.Typer(
 console = Console()
 
 
+def _display_pitch_result(pitch_result: dict, active_target=None) -> None:
+    """Display pitch analysis result with Rich formatting."""
+    median_pitch = pitch_result.get('median_pitch', 0)
+
+    # Determine status based on target
+    status = "neutral"
+    status_icon = "○"
+    if active_target and median_pitch > 0:
+        if active_target.min_pitch <= median_pitch <= active_target.max_pitch:
+            status = "success"
+            status_icon = "✓"
+        else:
+            status = "warning"
+            status_icon = "△"
+
+    # Color based on status
+    color_map = {
+        "success": "green",
+        "warning": "yellow",
+        "neutral": "blue"
+    }
+    color = color_map.get(status, "blue")
+
+    # Create result panel
+    result_panel = Panel(
+        f"[bold {color}]{median_pitch:.1f} Hz[/bold {color}]\n"
+        f"[dim]Mean: {pitch_result.get('mean_pitch', 0):.1f} Hz[/dim]\n"
+        f"[dim]Range: {pitch_result.get('min_pitch', 0):.0f} - {pitch_result.get('max_pitch', 0):.0f} Hz[/dim]\n"
+        f"\n[dim]Voicing: {pitch_result.get('voicing_rate', 0)*100:.1f}%[/dim]",
+        title=f" {status_icon} Result ",
+        border_style=color,
+        box=ROUNDED
+    )
+    console.print(result_panel)
+
+    # Show target comparison if available
+    if active_target:
+        in_range = active_target.min_pitch <= median_pitch <= active_target.max_pitch
+        target_text = f"Target: {active_target.min_pitch:.0f} - {active_target.max_pitch:.0f} Hz"
+        if in_range:
+            console.print(f"[green]✓ {target_text}[/green]")
+        else:
+            deviation = median_pitch - (active_target.min_pitch + active_target.max_pitch) / 2
+            direction = "above" if deviation > 0 else "below"
+            console.print(f"[yellow]○ {target_text} ({abs(deviation):.0f} Hz {direction})[/yellow]")
+
+
+def _get_sparkline(values: list, max_width: int = 20) -> str:
+    """Create a simple ASCII sparkline for pitch values."""
+    if not values or len(values) < 2:
+        return ""
+
+    # Normalize values
+    min_val = min(values)
+    max_val = max(values)
+    range_val = max_val - min_val
+    if range_val == 0:
+        range_val = 1
+
+    # Characters for different heights
+    chars = "▁▂▃▄▅▆▇█"
+
+    spark = ""
+    for v in values:
+        normalized = (v - min_val) / range_val
+        char_idx = int(normalized * (len(chars) - 1))
+        spark += chars[char_idx]
+
+    return spark
+
+
+def _format_duration(seconds: float) -> str:
+    """Format duration in human-readable format."""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    elif seconds < 3600:
+        return f"{seconds/60:.1f}m"
+    else:
+        return f"{seconds/3600:.1f}h"
+
+
 @app.command()
 def status():
     """Show current Fern status."""
+    from .db import get_default_db
+    from .config import get_default_config, load_config
+
     console.print(Panel.fit(
-        "[bold green]Fern Voice Training[/bold green]\n"
+        "[bold green]🌿 Fern[/bold green]\n"
         "[dim]Voice training feedback companion[/dim]",
         title="Status",
-        border_style="green"
+        border_style="green",
+        box=ROUNDED
     ))
-    
-    # Check if data directory exists
-    import os
+
+    # Check directories
     from pathlib import Path
-    
     data_dir = Path.home() / ".fern"
+    clips_dir = data_dir / "clips"
+    db_path = data_dir / "fern.db"
+
+    console.print("\n[bold]Directories[/bold]")
     if data_dir.exists():
-        console.print(f"✓ Data directory: {data_dir}")
+        console.print(f"  [green]✓[/green] Data: {data_dir}")
+        try:
+            if db_path.exists():
+                db_size = db_path.stat().st_size / 1024
+                console.print(f"    [dim]Database: {db_size:.1f} KB[/dim]")
+        except Exception:
+            pass
     else:
-        console.print(f"○ Data directory: {data_dir} (not created yet)")
-    
-    console.print("Ready to track your voice training journey!")
+        console.print(f"  [yellow]○[/yellow] Data: {data_dir} (not created)")
+
+    if clips_dir.exists():
+        clip_count = len(list(clips_dir.glob("**/*.wav")))
+        console.print(f"  [green]✓[/green] Clips: {clips_dir} ({clip_count} files)")
+    else:
+        console.print(f"  [yellow]○[/yellow] Clips: {clips_dir} (not created)")
+
+    # Load config and show target
+    try:
+        config = load_config()
+        target = config.get('target', {})
+        if target:
+            console.print(f"\n[bold]Active Target[/bold]")
+            console.print(f"  [green]✓[/green] {target.get('min_pitch', 80)} - {target.get('max_pitch', 250)} Hz")
+    except Exception:
+        pass
+
+    # Database stats
+    try:
+        db = get_default_db()
+        sessions = db.list_sessions(limit=1)
+        readings = db.get_recent_readings(limit=100)
+
+        console.print(f"\n[bold]Statistics[/bold]")
+        console.print(f"  Total sessions: [cyan]{len(sessions)}[/cyan]")
+        console.print(f"  Recent readings: [cyan]{len(readings)}[/cyan]")
+    except Exception as e:
+        console.print(f"\n[dim]Database not initialized yet[/dim]")
+
+    console.print("\n[dim]Use 'fern test' to try pitch detection[/dim]")
 
 
 @app.command()
 def test(
     duration: int = typer.Option(5, "--duration", "-d", help="Recording duration in seconds"),
-    device: Optional[int] = typer.Option(None, "--device", "-D", help="Audio device ID")
+    device: Optional[int] = typer.Option(None, "--device", "-D", help="Audio device ID"),
+    save: bool = typer.Option(False, "--save", "-s", help="Save recording to database")
 ):
     """Test pitch detection with microphone."""
-    from .analysis import extract_pitch_from_audio
+    from .analysis import extract_pitch_from_audio, extract_resonance_from_audio
+    from .db import get_default_db
+    from .config import load_config
     import sounddevice as sd
     import numpy as np
-    
+
     console.print(Panel.fit(
         f"[bold blue]Testing Pitch Detection[/bold blue]\n"
         f"[dim]Recording {duration} seconds of audio...[/dim]",
         title="Fern Test",
-        border_style="blue"
+        border_style="blue",
+        box=ROUNDED
     ))
-    
+
     try:
+        # Load config for target
+        try:
+            config = load_config()
+            target = config.get('target', {})
+            active_target = type('Target', (), {
+                'min_pitch': target.get('min_pitch', 80),
+                'max_pitch': target.get('max_pitch', 250)
+            })()
+        except Exception:
+            active_target = type('Target', (), {'min_pitch': 80, 'max_pitch': 250})()
+
         # Record audio
-        console.print("🎤 Recording audio... Speak now!")
+        console.print("\n🎤 [cyan]Recording... Speak now![/cyan]")
+
         audio_data = sd.rec(
-            duration * 44100, 
-            samplerate=44100, 
+            duration * 44100,
+            samplerate=44100,
             channels=1,
             device=device,
             dtype=np.float32
         )
         sd.wait()
         console.print("✓ Recording complete!")
-        
+
         # Extract pitch
-        console.print("🔍 Analyzing pitch...")
+        console.print("🔍 [cyan]Analyzing pitch...[/cyan]")
         pitch_result = extract_pitch_from_audio(audio_data.flatten(), 44100)
-        
+
+        # Extract resonance
+        resonance_result = extract_resonance_from_audio(audio_data.flatten(), 44100)
+
+        # Combine results
+        pitch_result.update({k: v for k, v in resonance_result.items() if k.startswith('f')})
+
         if pitch_result['median_pitch'] > 0:
-            console.print(f"✓ Median pitch: [bold]{pitch_result['median_pitch']:.1f} Hz[/bold]")
+            _display_pitch_result(pitch_result, active_target)
+
+            # Show resonance if available
+            if resonance_result.get('f1_mean', 0) > 0:
+                console.print("\n[bold]Resonance[/bold]")
+                console.print(f"  F1: [magenta]{resonance_result['f1_mean']:.0f} Hz[/magenta]")
+                console.print(f"  F2: [magenta]{resonance_result['f2_mean']:.0f} Hz[/magenta]")
+                console.print(f"  F3: [magenta]{resonance_result['f3_mean']:.0f} Hz[/magenta]")
+
+            # Save to database if requested
+            if save:
+                db = get_default_db()
+                session = db.create_session(type('Session', (), {
+                    'name': f"Test {datetime.now().isoformat()}",
+                    'start_time': datetime.now(),
+                    'target_id': None,
+                    'notes': None
+                })())
+
+                reading = type('Reading', (), {
+                    'session_id': session,
+                    'timestamp': datetime.now(),
+                    'median_pitch': pitch_result['median_pitch'],
+                    'mean_pitch': pitch_result['mean_pitch'],
+                    'min_pitch': pitch_result['min_pitch'],
+                    'max_pitch': pitch_result['max_pitch'],
+                    'std_pitch': pitch_result['std_pitch'],
+                    'voiced_frames': pitch_result['voiced_frames'],
+                    'total_frames': pitch_result['total_frames'],
+                    'voicing_rate': pitch_result['voicing_rate'],
+                    'f1_mean': resonance_result.get('f1_mean', 0),
+                    'f2_mean': resonance_result.get('f2_mean', 0),
+                    'f3_mean': resonance_result.get('f3_mean', 0),
+                    'f1_std': resonance_result.get('f1_std', 0),
+                    'f2_std': resonance_result.get('f2_std', 0),
+                    'f3_std': resonance_result.get('f3_std', 0),
+                    'clip_path': None,
+                    'duration_seconds': duration,
+                    'device_id': device
+                })()
+
+                reading_id = db.create_reading(reading)
+                console.print(f"\n[green]✓ Saved as reading #{reading_id}[/green]")
         else:
-            console.print("⚠ No pitch detected in audio")
-            
+            console.print("\n[yellow]⚠ No pitch detected in audio[/yellow]")
+            console.print("[dim]Try speaking closer to the microphone or increasing volume[/dim]")
+
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"\n[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
 
 @app.command()
 def trend(
     days: int = typer.Option(30, "--days", "-d", help="Number of days of history to show"),
-    target_id: Optional[int] = typer.Option(None, "--target", "-t", help="Filter by target ID")
+    target_id: Optional[int] = typer.Option(None, "--target", "-t", help="Filter by target ID"),
+    sparkline: bool = typer.Option(False, "--sparkline", "-s", help="Show ASCII sparkline")
 ):
     """Show pitch trend over time."""
     from .db import get_default_db
-    from rich.table import Table
-    from rich.align import Align
-    from datetime import datetime, timedelta
 
     console.print(Panel.fit(
-        f"[bold cyan]Pitch Trends[/bold cyan]\n"
+        f"[bold cyan]📈 Pitch Trends[/bold cyan]\n"
         f"[dim]Last {days} days of voice training[/dim]",
         title="Fern Trend",
-        border_style="cyan"
+        border_style="cyan",
+        box=ROUNDED
     ))
 
     try:
@@ -107,8 +300,14 @@ def trend(
         trend_data = db.get_trend_data(days=days, target_id=target_id)
 
         if not trend_data:
-            console.print("[yellow]No data available. Start training to see trends![/yellow]")
+            console.print("\n[yellow]No data available. Start training to see trends![/yellow]")
+            console.print("[dim]Use 'fern test --save' to record a session[/dim]")
             return
+
+        # Get active target for range comparison
+        active_target = db.get_active_target()
+        target_min = active_target.min_pitch if active_target else 80
+        target_max = active_target.max_pitch if active_target else 250
 
         # Calculate overall stats
         pitches = [p for _, p in trend_data if p > 0]
@@ -116,8 +315,12 @@ def trend(
             avg_pitch = sum(pitches) / len(pitches)
             min_pitch = min(pitches)
             max_pitch = max(pitches)
+            in_range_count = sum(1 for p in pitches if target_min <= p <= target_max)
+            in_range_pct = in_range_count / len(pitches) * 100
 
             # Calculate trend direction
+            trend_icon = "→"
+            trend_color = "dim"
             if len(pitches) >= 7:
                 recent_week = pitches[-7:]
                 earlier_week = pitches[:7] if len(pitches) >= 14 else pitches[:-7]
@@ -126,51 +329,288 @@ def trend(
                     earlier_avg = sum(earlier_week) / len(earlier_week)
                     delta = recent_avg - earlier_avg
                     if delta > 5:
-                        trend = "[green]↑ Rising[/green]"
+                        trend_icon = "↑"
+                        trend_color = "green"
                     elif delta < -5:
-                        trend = "[red]↓ Falling[/red]"
+                        trend_icon = "↓"
+                        trend_color = "red"
                     else:
-                        trend = "[yellow]→ Stable[/yellow]"
-                else:
-                    trend = "[dim]→ Stable[/dim]"
-            else:
-                trend = "[dim]→ Need more data[/dim]"
+                        trend_icon = "→"
+                        trend_color = "yellow"
 
-            console.print(f"\n[bold]Overall Statistics:[/bold]")
-            console.print(f"  Average: [cyan]{avg_pitch:.1f} Hz[/cyan]")
-            console.print(f"  Range:   {min_pitch:.1f} - {max_pitch:.1f} Hz")
-            console.print(f"  Trend:   {trend}")
+            console.print(f"\n[bold]Statistics ({len(pitches)} readings)[/bold]")
+
+            stats_table = Table(show_header=False, box=None)
+            stats_table.add_column("Label", style="dim")
+            stats_table.add_column("Value", justify="right")
+
+            stats_table.add_row("Average", f"[cyan]{avg_pitch:.1f} Hz[/cyan]")
+            stats_table.add_row("Range", f"{min_pitch:.0f} - {max_pitch:.0f} Hz")
+            stats_table.add_row("In Target", f"[green]{in_range_pct:.0f}%[/green]")
+            stats_table.add_row("Trend", f"[{trend_color}]{trend_icon} {trend_color}[/{trend_color}]")
+
+            console.print(stats_table)
+
+            # Show sparkline if requested
+            if sparkline:
+                spark = _get_sparkline(pitches[-30:] if len(pitches) > 30 else pitches)
+                console.print(f"\n[bold]Sparkline[/bold]")
+                console.print(f"[cyan]{spark}[/cyan]")
 
         # Show recent data table
-        console.print(f"\n[bold]Recent Readings:[/bold]")
-        table = Table(show_header=True, header_style="bold magenta")
+        console.print(f"\n[bold]Recent Readings[/bold]")
+        table = Table(show_header=True, header_style="bold magenta", box=ROUNDED)
         table.add_column("Date", style="dim", width=12)
-        table.add_column("Avg Pitch", justify="right")
-        table.add_column("Status", width=10)
+        table.add_column("Avg Pitch", justify="right", width=12)
+        table.add_column("Status", width=14)
+        table.add_column("Spark", width=24)
 
-        # Get active target for range comparison
-        active_target = db.get_active_target()
-        target_min = active_target.min_pitch if active_target else 80
-        target_max = active_target.max_pitch if active_target else 250
+        # Add sparklines to table
+        pitches_for_spark = [p for _, p in trend_data if p > 0]
 
-        for date, pitch in trend_data[-14:]:  # Show last 14 entries max
+        for i, (date, pitch) in enumerate(trend_data[-14:]):
             date_str = date.strftime("%Y-%m-%d")
-            pitch_str = f"{pitch:.1f} Hz" if pitch > 0 else "—"
+            pitch_str = f"[cyan]{pitch:.1f} Hz[/cyan]" if pitch > 0 else "—"
 
             if pitch > 0:
                 if target_min <= pitch <= target_max:
                     status = "[green]✓ In range[/green]"
                 else:
-                    status = "[yellow]○ Out of range[/yellow]"
+                    status = "[yellow]△ Out of range[/yellow]"
             else:
                 status = "[dim]—[/dim]"
 
-            table.add_row(date_str, pitch_str, status)
+            # Mini sparkline for this row (last N points up to this point)
+            spark_values = [v for _, v in trend_data[max(0, i - len(trend_data) - 20):i + 1] if v > 0]
+            spark = _get_sparkline(spark_values) if spark_values else ""
+
+            table.add_row(date_str, pitch_str, status, f"[dim]{spark}[/dim]")
 
         console.print(Align.center(table))
 
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"\n[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def sessions(
+    limit: int = typer.Option(10, "--limit", "-l", help="Maximum sessions to show")
+):
+    """List recent training sessions."""
+    from .db import get_default_db
+
+    console.print(Panel.fit(
+        f"[bold purple]📋 Recent Sessions[/bold purple]\n"
+        f"[dim]Last {limit} training sessions[/dim]",
+        title="Fern Sessions",
+        border_style="purple",
+        box=ROUNDED
+    ))
+
+    try:
+        db = get_default_db()
+        sessions = db.list_sessions(limit=limit)
+
+        if not sessions:
+            console.print("\n[yellow]No sessions recorded yet.[/yellow]")
+            console.print("[dim]Use 'fern test --save' to start a session[/dim]")
+            return
+
+        table = Table(show_header=True, header_style="bold magenta", box=ROUNDED)
+        table.add_column("ID", width=6, justify="right")
+        table.add_column("Date", style="dim", width=14)
+        table.add_column("Readings", justify="right", width=10)
+        table.add_column("Avg Pitch", justify="right", width=12)
+        table.add_column("Duration", width=10)
+
+        for session in sessions:
+            start_date = session.start_time.strftime("%Y-%m-%d %H:%M")
+            readings = str(session.reading_count)
+            avg_pitch = f"{session.avg_median_pitch:.1f} Hz" if session.avg_median_pitch > 0 else "—"
+
+            # Calculate duration if end_time available
+            if session.end_time:
+                duration = (session.end_time - session.start_time).total_seconds()
+                duration_str = _format_duration(duration)
+            else:
+                duration_str = "—"
+
+            table.add_row(
+                str(session.id or "—"),
+                start_date,
+                readings,
+                avg_pitch,
+                duration_str
+            )
+
+        console.print(Align.center(table))
+
+    except Exception as e:
+        console.print(f"\n[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def review(
+    session_id: int,
+    export: Optional[str] = typer.Option(None, "--export", "-e", help="Export format: csv, json")
+):
+    """Review a specific session in detail."""
+    from .db import get_default_db
+
+    console.print(Panel.fit(
+        f"[bold magenta]📖 Session #{session_id}[/bold magenta]",
+        title="Fern Review",
+        border_style="magenta",
+        box=ROUNDED
+    ))
+
+    try:
+        db = get_default_db()
+        session = db.get_session(session_id)
+
+        if not session:
+            console.print(f"\n[red]Session #{session_id} not found[/red]")
+            raise typer.Exit(1)
+
+        readings = db.get_readings_for_session(session_id)
+
+        # Session summary
+        console.print(f"\n[bold]Session Info[/bold]")
+        console.print(f"  Date: {session.start_time.strftime('%Y-%m-%d %H:%M')}")
+        if session.end_time:
+            duration = (session.end_time - session.start_time).total_seconds()
+            console.print(f"  Duration: {_format_duration(duration)}")
+        console.print(f"  Readings: {len(readings)}")
+
+        if session.avg_median_pitch > 0:
+            console.print(f"  Average Pitch: [cyan]{session.avg_median_pitch:.1f} Hz[/cyan]")
+
+        if session.notes:
+            console.print(f"\n[bold]Notes[/bold]")
+            console.print(f"  [dim]{session.notes}[/dim]")
+
+        if not readings:
+            console.print("\n[yellow]No readings in this session[/yellow]")
+            return
+
+        # Readings table
+        console.print(f"\n[bold]Readings[/bold]")
+        table = Table(show_header=True, header_style="bold cyan", box=ROUNDED)
+        table.add_column("Time", style="dim", width=10)
+        table.add_column("Pitch", justify="right", width=10)
+        table.add_column("Mean", justify="right", width=10)
+        table.add_column("Voicing", justify="right", width=10)
+        table.add_column("F1", justify="right", width=8)
+        table.add_column("F2", justify="right", width=8)
+
+        for reading in readings:
+            time_str = reading.timestamp.strftime("%H:%M")
+            pitch = f"{reading.median_pitch:.1f}" if reading.median_pitch > 0 else "—"
+            mean = f"{reading.mean_pitch:.1f}" if reading.mean_pitch > 0 else "—"
+            voicing = f"{reading.voicing_rate*100:.0f}%" if reading.voicing_rate > 0 else "—"
+            f1 = f"{reading.f1_mean:.0f}" if reading.f1_mean > 0 else "—"
+            f2 = f"{reading.f2_mean:.0f}" if reading.f2_mean > 0 else "—"
+
+            table.add_row(time_str, pitch, mean, voicing, f1, f2)
+
+        console.print(Align.center(table))
+
+        # Export if requested
+        if export:
+            if export == "csv":
+                csv_path = f"session_{session_id}.csv"
+                with open(csv_path, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=[
+                        'id', 'timestamp', 'median_pitch', 'mean_pitch', 'min_pitch',
+                        'max_pitch', 'voicing_rate', 'f1_mean', 'f2_mean', 'f3_mean'
+                    ])
+                    writer.writeheader()
+                    for r in readings:
+                        writer.writerow(r.to_dict())
+                console.print(f"\n[green]✓ Exported to {csv_path}[/green]")
+
+            elif export == "json":
+                json_path = f"session_{session_id}.json"
+                with open(json_path, 'w') as f:
+                    json.dump({
+                        'session': session.to_dict(),
+                        'readings': [r.to_dict() for r in readings]
+                    }, f, indent=2)
+                console.print(f"\n[green]✓ Exported to {json_path}[/green]")
+
+            else:
+                console.print(f"\n[yellow]Unknown export format: {export}[/yellow]")
+
+    except Exception as e:
+        console.print(f"\n[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def export(
+    format: str = typer.Option("csv", "--format", "-f", help="Export format: csv, json"),
+    days: int = typer.Option(30, "--days", "-d", help="Export data from last N days"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path")
+):
+    """Export training data."""
+    from .db import get_default_db
+    from datetime import timedelta
+
+    format_map = {"csv": "CSV", "json": "JSON"}
+    format_name = format_map.get(format, format.upper())
+
+    console.print(Panel.fit(
+        f"[bold green]📤 Export Data[/bold green]\n"
+        f"[dim]Last {days} days as {format_name}[/dim]",
+        title="Fern Export",
+        border_style="green",
+        box=ROUNDED
+    ))
+
+    try:
+        db = get_default_db()
+        cutoff = datetime.now() - timedelta(days=days)
+        readings = db.get_recent_readings(1000)
+
+        # Filter by date
+        filtered_readings = [r for r in readings if r.timestamp >= cutoff]
+
+        if not filtered_readings:
+            console.print("\n[yellow]No data to export[/yellow]")
+            return
+
+        # Determine output path
+        if output:
+            output_path = output
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = f"fern_export_{timestamp}.{format}"
+
+        if format == "csv":
+            with open(output_path, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=[
+                    'id', 'session_id', 'timestamp', 'median_pitch', 'mean_pitch',
+                    'min_pitch', 'max_pitch', 'voicing_rate', 'f1_mean', 'f2_mean', 'f3_mean'
+                ])
+                writer.writeheader()
+                for r in filtered_readings:
+                    writer.writerow(r.to_dict())
+
+        elif format == "json":
+            with open(output_path, 'w') as f:
+                json.dump({
+                    'export_date': datetime.now().isoformat(),
+                    'days': days,
+                    'total_readings': len(filtered_readings),
+                    'readings': [r.to_dict() for r in filtered_readings]
+                }, f, indent=2)
+
+        console.print(f"\n[green]✓ Exported {len(filtered_readings)} readings to {output_path}[/green]")
+
+    except Exception as e:
+        console.print(f"\n[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
 
@@ -178,7 +618,125 @@ def trend(
 def version():
     """Show Fern version."""
     from . import __version__
-    console.print(f"Fern v{__version__}")
+    from rich.text import Text
+
+    version_text = Text()
+    version_text.append("🌿 Fern v", style="green")
+    version_text.append(__version__, style="bold cyan")
+    version_text.append("\nVoice training feedback companion", style="dim")
+
+    console.print(Panel(version_text, title="Version", border_style="green", box=ROUNDED))
+
+
+@app.command()
+def config():
+    """Configure Fern settings."""
+    console.print(Panel.fit(
+        "[bold yellow]⚙️ Fern Configuration[/bold yellow]",
+        title="Config",
+        border_style="yellow",
+        box=ROUNDED
+    ))
+    console.print("Use subcommands: [cyan]set-target[/cyan], [cyan]show[/cyan]")
+    console.print("Example: [dim]fern config set-target 100 200[/dim]")
+
+
+@app.command("config:show")
+def config_show():
+    """Show current configuration."""
+    from .config import load_config, get_default_config_path
+    from .db import get_default_db
+
+    console.print(Panel.fit(
+        "[bold blue]⚙️ Current Configuration[/bold blue]",
+        title="Config",
+        border_style="blue",
+        box=ROUNDED
+    ))
+
+    try:
+        config = load_config(get_default_config_path())
+        target = config.get("target_pitch_range", {})
+        audio = config.get("audio", {})
+        analysis = config.get("analysis", {})
+
+        console.print("\n[bold]Target Pitch Range[/bold]")
+        console.print(f"  Min: [cyan]{target.get('min', 80):.0f} Hz[/cyan]")
+        console.print(f"  Max: [cyan]{target.get('max', 250):.0f} Hz[/cyan]")
+
+        console.print("\n[bold]Audio Settings[/bold]")
+        console.print(f"  Sample Rate: [cyan]{audio.get('sample_rate', 44100)} Hz[/cyan]")
+        console.print(f"  Channels: [cyan]{audio.get('channels', 1)}[/cyan]")
+        if audio.get('device'):
+            console.print(f"  Device ID: [cyan]{audio.get('device')}[/cyan]")
+
+        console.print("\n[bold]Analysis Settings[/bold]")
+        console.print(f"  Pitch Min: [cyan]{analysis.get('pitch_min', 75)} Hz[/cyan]")
+        console.print(f"  Pitch Max: [cyan]{analysis.get('pitch_max', 600)} Hz[/cyan]")
+
+        # Also show active database target
+        try:
+            db = get_default_db()
+            active_target = db.get_active_target()
+            if active_target:
+                console.print("\n[bold]Database Target[/bold]")
+                console.print(f"  Name: [cyan]{active_target.name}[/cyan]")
+                console.print(f"  Range: [cyan]{active_target.min_pitch:.0f} - {active_target.max_pitch:.0f} Hz[/cyan]")
+        except Exception:
+            pass
+
+    except Exception as e:
+        console.print(f"\n[yellow]No configuration file found: {e}[/yellow]")
+        console.print("[dim]Use 'fern config set-target <min> <max>' to create one[/dim]")
+
+
+@app.command("config:set-target")
+def config_set_target(
+    min_pitch: float = typer.Argument(..., help="Minimum target pitch in Hz"),
+    max_pitch: float = typer.Argument(..., help="Maximum target pitch in Hz"),
+    update_db: bool = typer.Option(False, "--db", help="Also update database target")
+):
+    """Set the target pitch range."""
+    from .config import load_config, save_config, get_default_config_path, set_target, get_default_config
+    from .db import get_default_db, Target
+
+    console.print(Panel.fit(
+        f"[bold green]🎯 Set Target Range[/bold green]\n"
+        f"[dim]{min_pitch:.0f} - {max_pitch:.0f} Hz[/dim]",
+        title="Config",
+        border_style="green",
+        box=ROUNDED
+    ))
+
+    try:
+        # Load existing config or create new one
+        try:
+            config = load_config(get_default_config_path())
+        except Exception:
+            config = get_default_config()
+            console.print("[dim]Created new configuration file[/dim]")
+
+        # Validate and set target
+        config = set_target(config, min_pitch, max_pitch)
+        save_config(config, get_default_config_path())
+        console.print(f"\n[green]✓ Target range set to {min_pitch:.0f} - {max_pitch:.0f} Hz[/green]")
+
+        # Also update database if requested
+        if update_db:
+            db = get_default_db()
+            target = Target(
+                name=f"CLI Target {datetime.now().strftime('%Y-%m-%d')}",
+                min_pitch=min_pitch,
+                max_pitch=max_pitch,
+                is_active=True
+            )
+            target_id = db.create_target(target)
+            db.set_active_target(target_id)
+            console.print(f"[green]✓ Also updated database target (ID: {target_id})[/green]")
+
+    except Exception as e:
+        console.print(f"\n[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
