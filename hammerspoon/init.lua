@@ -44,6 +44,8 @@ local state = {
 
 -- Load required modules
 require("overlay")
+require("charts")
+require("chart_view")
 
 -- Initialize Fern
 function FernInit()
@@ -154,6 +156,62 @@ function FernSetupHotkeys()
         end
     )
 
+    -- Toggle chart view (Ctrl+Alt+Shift+C)
+    hs.hotkey.bind(
+        FernConfig.toggleOverlayHotkey[1],
+        {"C"},
+        "Toggle chart view",
+        function()
+            FernToggleChartView()
+        end
+    )
+
+    -- Chart view navigation (when chart is visible)
+    hs.hotkey.bind(
+        {"ctrl", "alt", "shift"},
+        {"1"},
+        "Pitch Trend view",
+        function()
+            FernChartViewHandleKey("1")
+        end
+    )
+
+    hs.hotkey.bind(
+        {"ctrl", "alt", "shift"},
+        {"2"},
+        "Resonance Profile view",
+        function()
+            FernChartViewHandleKey("2")
+        end
+    )
+
+    hs.hotkey.bind(
+        {"ctrl", "alt", "shift"},
+        {"3"},
+        "Session Summary view",
+        function()
+            FernChartViewHandleKey("3")
+        end
+    )
+
+    hs.hotkey.bind(
+        {"ctrl", "alt", "shift"},
+        {"H"},
+        "Show chart help",
+        function()
+            FernChartViewHandleKey("h")
+        end
+    )
+
+    hs.hotkey.bind(
+        {"ctrl", "alt", "shift"},
+        {"escape"},
+        "Close chart view",
+        function()
+            FernChartViewHandleKey("escape")
+        end
+    )
+
     print("[Fern] Hotkeys configured")
 end
 
@@ -227,6 +285,43 @@ function FernUpdateDisplay(results)
     FernRefreshOverlay()
 end
 
+-- Chart view functions
+function FernToggleChartView()
+    FernChartViewToggle("trend", FernGetChartData())
+end
+
+function FernShowChartView(view)
+    FernChartViewShow(view, FernGetChartData())
+end
+
+function FernGetChartData()
+    -- Try to read chart data from signal file
+    local dataFile = io.open("/tmp/fern_chart_data", "r")
+    if dataFile then
+        local content = dataFile:read("*a")
+        dataFile:close()
+        local ok, data = pcall(hs.json.decode, content)
+        if ok then
+            return data
+        end
+    end
+
+    -- Return empty structure if no data
+    return {
+        trend = {},
+        resonance = { f1 = 0, f2 = 0, f3 = 0 },
+        stats = {
+            sessions = 0,
+            totalTime = "0m",
+            avgPitch = 0,
+            inRangePct = 0,
+            bestDay = "--",
+            streak = 0
+        },
+        sessions = {}
+    }
+end
+
 -- Overlay management
 function FernShowOverlay()
     if not state.overlay then
@@ -285,6 +380,8 @@ function FernCleanup()
     if state.overlay then
         state.overlay:delete()
     end
+
+    FernChartViewCleanup()
 
     print("[Fern] Cleanup complete")
 end

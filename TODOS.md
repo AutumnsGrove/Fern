@@ -53,10 +53,15 @@ Goal: Basic pitch detection from microphone
 
 ## Phase 6: Charts
 
-- [ ] Implement `hammerspoon/charts.lua`
-- [ ] Add historical trend visualization
-- [ ] Create target range indicators on charts
-- [ ] Add keyboard navigation for chart view
+- [x] Implement `hammerspoon/charts.lua`
+- [x] Add historical trend visualization
+- [x] Create target range indicators on charts
+- [x] Add keyboard navigation for chart view
+- [x] Implement `hammerspoon/chart_view.lua` with full navigation
+- [x] Add view toggle (trend, resonance, summary)
+- [x] Add time range selection (7d, 30d, 90d)
+- [x] Add help overlay with keyboard shortcuts
+- [x] Add `fern chart` CLI command
 
 ## Phase 7: Installation & Packaging
 

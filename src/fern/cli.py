@@ -739,5 +739,145 @@ def config_set_target(
         raise typer.Exit(1)
 
 
+@app.command()
+def chart(
+    days: int = typer.Option(7, "--days", "-d", help="Number of days of data to show"),
+    send: bool = typer.Option(False, "--send", "-s", help="Send data to Hammerspoon GUI"),
+    view: str = typer.Option("trend", "--view", "-v", help="View: trend, resonance, summary")
+):
+    """Show pitch charts and optionally send data to Hammerspoon GUI."""
+    from .db import get_default_db
+    from datetime import timedelta
+    from pathlib import Path
+
+    console.print(Panel.fit(
+        f"[bold green]📊 Fern Chart Data[/bold green]\n"
+        f"[dim]Last {days} days[/dim]",
+        title="Charts",
+        border_style="green",
+        box=ROUNDED
+    ))
+
+    try:
+        db = get_default_db()
+        cutoff = datetime.now() - timedelta(days=days)
+        readings = db.get_recent_readings(1000)
+        filtered_readings = [r for r in readings if r.timestamp >= cutoff]
+
+        if not filtered_readings:
+            console.print("\n[yellow]No data available for the selected period[/yellow]")
+            return
+
+        # Group readings by date for trend data
+        trend_by_date = {}
+        session_stats = {}
+        total_pitch = 0
+        in_range_count = 0
+
+        # Get target range
+        try:
+            active_target = db.get_active_target()
+            target_min = active_target.min_pitch if active_target else 80
+            target_max = active_target.max_pitch if active_target else 250
+        except Exception:
+            target_min = 80
+            target_max = 250
+
+        for r in filtered_readings:
+            if r.median_pitch > 0:
+                date_key = r.timestamp.strftime("%Y-%m-%d")
+                if date_key not in trend_by_date:
+                    trend_by_date[date_key] = []
+                trend_by_date[date_key].append(r.median_pitch)
+
+                total_pitch += r.median_pitch
+
+                if target_min <= r.median_pitch <= target_max:
+                    in_range_count += 1
+
+        # Build trend data
+        trend_data = []
+        for date in sorted(trend_by_date.keys()):
+            values = trend_by_date[date]
+            avg_pitch = sum(values) / len(values)
+            trend_data.append({
+                "date": date,
+                "value": avg_pitch
+            })
+
+        # Calculate stats
+        num_readings = len([r for r in filtered_readings if r.median_pitch > 0])
+        avg_pitch = total_pitch / num_readings if num_readings > 0 else 0
+        in_range_pct = (in_range_count / num_readings * 100) if num_readings > 0 else 0
+
+        # Get recent sessions for summary
+        sessions = db.list_sessions(limit=10)
+        session_list = []
+        for s in sessions:
+            s_readings = db.get_readings_for_session(s.id)
+            s_pitch_values = [r.median_pitch for r in s_readings if r.median_pitch > 0]
+            s_avg = sum(s_pitch_values) / len(s_pitch_values) if s_pitch_values else 0
+            s_in_range = sum(1 for p in s_pitch_values if target_min <= p <= target_max)
+            s_pct = (s_in_range / len(s_pitch_values) * 100) if s_pitch_values else 0
+
+            session_list.append({
+                "date": s.timestamp.strftime("%Y-%m-%d %H:%M"),
+                "duration": f"{s.duration_s:.0f}s",
+                "avgPitch": f"{s_avg:.0f} Hz",
+                "inRange": s_pct >= 50
+            })
+
+        # Prepare chart data
+        chart_data = {
+            "trend": trend_data,
+            "resonance": {
+                "f1": 0,
+                "f2": 0,
+                "f3": 0
+            },
+            "stats": {
+                "sessions": len(sessions),
+                "totalTime": f"{sum(s.duration_s for s in sessions):.0f}m",
+                "avgPitch": avg_pitch,
+                "inRangePct": in_range_pct,
+                "bestDay": max(trend_by_date.keys(), key=lambda d: sum(trend_by_date[d])/len(trend_by_date[d]) if trend_by_date[d] else 0) if trend_by_date else "--",
+                "streak": 0
+            },
+            "sessions": session_list,
+            "targetMin": target_min,
+            "targetMax": target_max
+        }
+
+        # Display summary
+        console.print(f"\n[bold]Period Summary ({days} days)[/bold]")
+        console.print(f"  Sessions: [cyan]{len(sessions)}[/cyan]")
+        console.print(f"  Total readings: [cyan]{num_readings}[/cyan]")
+        console.print(f"  Average pitch: [cyan]{avg_pitch:.0f} Hz[/cyan]")
+        console.print(f"  In range: [cyan]{in_range_pct:.0f}%[/cyan]")
+        console.print(f"  Target: [cyan]{target_min:.0f} - {target_max:.0f} Hz[/cyan]")
+
+        # Show sparkline
+        if len(trend_data) > 1:
+            values = [d["value"] for d in trend_data]
+            sparkline = _get_sparkline(values, 30)
+            console.print(f"\n[bold]Trend Sparkline[/bold]")
+            console.print(f"  [green]{sparkline}[/green]")
+
+        # Send to Hammerspoon if requested
+        if send:
+            signal_path = Path("/tmp/fern_chart_data")
+            signal_path.parent.mkdir(parents=True, exist_ok=True)
+            signal_path.write_text(json.dumps(chart_data))
+            console.print(f"\n[green]✓ Chart data sent to Hammerspoon[/green]")
+            console.print("[dim]Press Ctrl+Alt+Shift+C in Hammerspoon to view charts[/dim]")
+        else:
+            console.print(f"\n[dim]Use --send flag to send data to Hammerspoon GUI[/dim]")
+            console.print("[dim]Press Ctrl+Alt+Shift+C in Hammerspoon to view charts[/dim]")
+
+    except Exception as e:
+        console.print(f"\n[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()
