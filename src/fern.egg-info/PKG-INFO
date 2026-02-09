@@ -1,0 +1,189 @@
+Metadata-Version: 2.4
+Name: fern
+Version: 0.1.0
+Summary: Voice training feedback companion
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: sounddevice>=0.4.6
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: librosa>=0.10.0
+Requires-Dist: praat-parselmouth>=0.4.3
+Requires-Dist: matplotlib>=3.7.0
+Requires-Dist: typer[all]>=0.9.0
+Requires-Dist: rich>=13.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+
+# Fern 🌿
+
+A voice training feedback companion that hooks into your existing dictation workflow. Fern listens when you speak, shows you what your voice is doing, and helps you grow toward the voice you want. No dedicated practice sessions required.
+
+## Overview
+
+Fern integrates seamlessly with your existing dictation setup (works alongside [Hex](https://github.com/autumnsgrove/hex)). When you trigger dictation with your hotkey, Fern captures your voice, analyzes pitch and resonance in real-time, and provides immediate visual feedback through a Hammerspoon overlay. Over time, it tracks your progress and helps you build a voice that feels like you.
+
+**Key Features:**
+- 🎙️ **Passive Listening** - Captures audio during normal dictation, no extra effort needed
+- 📊 **Real-time Feedback** - Live pitch and resonance visualization via Hammerspoon overlay
+- 📈 **Progress Tracking** - Long-term trends stored in SQLite with rolling audio archives
+- 🎯 **Guided Exercises** - Optional structured practice sessions when you want them (v1.5)
+- 🔒 **Privacy-First** - All data stays local on your machine
+
+## Architecture
+
+Fern uses a two-layer architecture:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  GUI Layer (Hammerspoon - Lua)                         │
+│  ├── Global hotkey detection (same key as Hex)          │
+│  ├── Live overlay display (pitch bar, resonance arc)    │
+│  ├── Chart view (historical trends)                     │
+│  └── Target configuration UI                            │
+├─────────────────────────────────────────────────────────┤
+│  Backend Layer (Python 3.11+)                           │
+│  ├── Audio capture (sounddevice)                        │
+│  ├── Pitch analysis (praat-parselmouth)                 │
+│  ├── Resonance analysis (librosa)                       │
+│  ├── Data persistence (SQLite)                          │
+│  └── CLI interface (Typer + Rich)                       │
+└─────────────────────────────────────────────────────────┘
+```
+
+## Project Structure
+
+```
+Fern/
+├── src/fern/                  # Python source
+│   ├── capture.py             # Audio capture module
+│   ├── analysis.py            # Pitch/resonance analysis
+│   ├── db.py                  # SQLite interface
+│   ├── models.py              # Dataclasses (Session, Reading, etc.)
+│   ├── config.py              # Configuration management
+│   ├── websocket_server.py    # IPC between Python & Hammerspoon
+│   └── cli.py                 # Typer CLI entry point
+├── hammerspoon/               # Lua GUI layer
+│   ├── init.lua               # Main entry point
+│   ├── overlay.lua            # Live display overlay
+│   └── charts.lua             # Historical chart display
+├── tests/                     # Test suite
+├── pyproject.toml             # UV package configuration
+└── README.md                  # This file
+```
+
+## Tech Stack
+
+- **Language**: Python 3.11+
+- **CLI Framework**: [Typer](https://typer.tiangolo.com/) + [Rich](https://rich.readthedocs.io/)
+- **Audio Capture**: [sounddevice](https://python-sounddevice.readthedocs.io/)
+- **Pitch Analysis**: [praat-parselmouth](https://parselmouth.readthedocs.io/)
+- **Resonance Analysis**: [librosa](https://librosa.org/)
+- **Visualization**: [matplotlib](https://matplotlib.org/)
+- **Database**: SQLite (local storage)
+- **GUI Layer**: [Hammerspoon](https://www.hammerspoon.org/) (Lua)
+- **Package Manager**: [UV](https://docs.astral.sh/uv/)
+
+## Data Storage
+
+Fern stores all data locally in `~/.fern/`:
+
+```
+~/.fern/
+├── fern.db                    # SQLite database (sessions, readings, targets)
+├── clips/                     # Rolling audio archive (30 most recent)
+│   ├── clip_001.wav
+│   ├── clip_002.wav
+│   └── ...
+└── archive/                   # Quarterly archives (zipped by quarter)
+    ├── clips-2025-Q1.zip
+    └── clips-2025-Q2.zip
+```
+
+## Quick Start
+
+### Prerequisites
+
+- macOS (for Hammerspoon integration)
+- Python 3.11+
+- [UV](https://docs.astral.sh/uv/getting-started/installation/)
+- [Hammerspoon](https://www.hammerspoon.org/go/)
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/autumnsgrove/fern.git
+cd fern
+
+# Install Python dependencies
+uv sync
+
+# Install Fern CLI
+uv pip install -e .
+
+# Install Hammerspoon config
+ln -s $(pwd)/hammerspoon/init.lua ~/.hammerspoon/fern.lua
+echo 'require("fern")' >> ~/.hammerspoon/init.lua
+```
+
+### Usage
+
+Fern runs automatically alongside your existing dictation workflow:
+
+1. **Speak** - Press your dictation hotkey (same as Hex) and speak
+2. **See** - Watch the overlay show your pitch and resonance in real-time
+3. **Track** - Review progress with `fern trend` or open charts in Hammerspoon
+
+**CLI Commands:**
+
+```bash
+# View recent sessions
+fern status
+
+# Show historical trends (terminal sparklines)
+fern trend
+
+# Configure targets
+fern config set-target --pitch 180 --resonance 600
+
+# Review a specific session
+fern review <session-id>
+
+# Export data
+fern export --format csv --output voice-data.csv
+```
+
+## Development
+
+### Setup
+
+```bash
+# Install development dependencies
+uv sync --dev
+
+# Run tests
+uv run pytest
+
+# Format code
+uv run ruff format .
+
+# Type check
+uv run mypy src/
+```
+
+### Project Phases
+
+See [Fern-Spec.md](Fern-Spec.md) for the complete technical specification and implementation roadmap.
+
+Current phase: **Phase 1 - Foundation** (project structure, basic pitch detection)
+
+## License
+
+[MIT License](LICENSE)
+
+---
+
+**Repository**: [github.com/autumnsgrove/fern](https://github.com/autumnsgrove/fern)  
+**Related**: Works alongside [Hex](https://github.com/autumnsgrove/hex) dictation system
