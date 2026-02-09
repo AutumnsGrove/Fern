@@ -1,6 +1,7 @@
 """""CLI entry point.
 
 Typer-based command line interface for Fern.
+Features comprehensive error handling with unique error codes.
 """
 
 from typing import Optional
@@ -15,6 +16,19 @@ from rich import print as rprint
 from datetime import datetime
 import csv
 import json
+import os
+
+from .errors import (
+    FernError,
+    create_error,
+    wrap_exception,
+    display_error,
+    display_fatal_error,
+    ErrorSeverity,
+    ErrorCategory,
+    handle_errors
+)
+from .logging import get_logger, log_session, log_capture, log_analysis
 
 app = typer.Typer(
     name="fern",
@@ -23,6 +37,20 @@ app = typer.Typer(
 )
 
 console = Console()
+
+# Initialize logger
+logger = get_logger()
+
+
+def _fern_exit(code: str = "FERN-000", message: Optional[str] = None) -> None:
+    """Exit with a Fern error code.
+
+    Args:
+        code: Error code
+        message: Optional message override
+    """
+    error = create_error(code, message=message)
+    display_fatal_error(error)
 
 
 def _display_pitch_result(pitch_result: dict, active_target=None) -> None:
@@ -110,7 +138,7 @@ def _format_duration(seconds: float) -> str:
 def status():
     """Show current Fern status."""
     from .db import get_default_db
-    from .config import get_default_config, load_config
+    from .config import get_default_config, load_config, get_default_config_path, ConfigFileNotFoundError
 
     console.print(Panel.fit(
         "[bold green]🌿 Fern[/bold green]\n"
@@ -133,8 +161,8 @@ def status():
             if db_path.exists():
                 db_size = db_path.stat().st_size / 1024
                 console.print(f"    [dim]Database: {db_size:.1f} KB[/dim]")
-        except Exception:
-            pass
+        except OSError as e:
+            logger.warning("Could not stat database file", error=str(e))
     else:
         console.print(f"  [yellow]○[/yellow] Data: {data_dir} (not created)")
 
@@ -146,13 +174,16 @@ def status():
 
     # Load config and show target
     try:
-        config = load_config()
+        config = load_config(get_default_config_path())
         target = config.get('target', {})
         if target:
             console.print(f"\n[bold]Active Target[/bold]")
             console.print(f"  [green]✓[/green] {target.get('min_pitch', 80)} - {target.get('max_pitch', 250)} Hz")
-    except Exception:
-        pass
+    except (FileNotFoundError, ConfigFileNotFoundError):
+        console.print(f"\n[bold]Active Target[/bold]")
+        console.print(f"  [yellow]○[/yellow] Using defaults (80 - 250 Hz)")
+    except Exception as e:
+        logger.warning("Could not load config", error=str(e))
 
     # Database stats
     try:
@@ -178,7 +209,7 @@ def test(
     """Test pitch detection with microphone."""
     from .analysis import extract_pitch_from_audio, extract_resonance_from_audio
     from .db import get_default_db
-    from .config import load_config
+    from .config import load_config, get_default_config_path, ConfigFileNotFoundError
     import sounddevice as sd
     import numpy as np
 
@@ -193,40 +224,63 @@ def test(
     try:
         # Load config for target
         try:
-            config = load_config()
+            config = load_config(get_default_config_path())
             target = config.get('target', {})
             active_target = type('Target', (), {
                 'min_pitch': target.get('min_pitch', 80),
                 'max_pitch': target.get('max_pitch', 250)
             })()
-        except Exception:
+        except (FileNotFoundError, ConfigFileNotFoundError):
             active_target = type('Target', (), {'min_pitch': 80, 'max_pitch': 250})()
+            logger.info("Using default target range (80-250 Hz)")
 
         # Record audio
         console.print("\n🎤 [cyan]Recording... Speak now![/cyan]")
 
-        audio_data = sd.rec(
-            duration * 44100,
-            samplerate=44100,
-            channels=1,
-            device=device,
-            dtype=np.float32
-        )
-        sd.wait()
-        console.print("✓ Recording complete!")
+        try:
+            audio_data = sd.rec(
+                duration * 44100,
+                samplerate=44100,
+                channels=1,
+                device=device,
+                dtype=np.float32
+            )
+            sd.wait()
+            console.print("✓ Recording complete!")
+            log_capture("completed", device=str(device) if device else "default", sample_rate=44100)
+        except sd.PortAudioError as e:
+            if "Device unavailable" in str(e) or "busy" in str(e).lower():
+                raise create_error("FERN-102", technical_details=str(e))
+            elif "Invalid sample rate" in str(e):
+                raise create_error("FERN-104", technical_details=str(e))
+            else:
+                raise wrap_exception(e, "FERN-103", {"operation": "audio_capture"})
 
         # Extract pitch
         console.print("🔍 [cyan]Analyzing pitch...[/cyan]")
-        pitch_result = extract_pitch_from_audio(audio_data.flatten(), 44100)
+
+        try:
+            pitch_result = extract_pitch_from_audio(audio_data.flatten(), 44100)
+        except Exception as e:
+            logger.exception("Pitch extraction failed", exc=e)
+            raise wrap_exception(e, "FERN-200")
 
         # Extract resonance
-        resonance_result = extract_resonance_from_audio(audio_data.flatten(), 44100)
+        try:
+            resonance_result = extract_resonance_from_audio(audio_data.flatten(), 44100)
+        except Exception as e:
+            logger.exception("Resonance extraction failed", exc=e)
+            raise wrap_exception(e, "FERN-203")
 
         # Combine results
         pitch_result.update({k: v for k, v in resonance_result.items() if k.startswith('f')})
 
         if pitch_result['median_pitch'] > 0:
             _display_pitch_result(pitch_result, active_target)
+            log_analysis(-1, pitch_result['median_pitch'],
+                        f1=resonance_result.get('f1_mean'),
+                        f2=resonance_result.get('f2_mean'),
+                        f3=resonance_result.get('f3_mean'))
 
             # Show resonance if available
             if resonance_result.get('f1_mean', 0) > 0:
@@ -234,9 +288,16 @@ def test(
                 console.print(f"  F1: [magenta]{resonance_result['f1_mean']:.0f} Hz[/magenta]")
                 console.print(f"  F2: [magenta]{resonance_result['f2_mean']:.0f} Hz[/magenta]")
                 console.print(f"  F3: [magenta]{resonance_result['f3_mean']:.0f} Hz[/magenta]")
+        else:
+            console.print("\n[yellow]⚠ No pitch detected in audio[/yellow]")
+            console.print("[dim]Try speaking closer to the microphone or increasing volume[/dim]")
+            error = create_error("FERN-201")
+            display_error(error)
+            raise typer.Exit(0)
 
-            # Save to database if requested
-            if save:
+        # Save to database if requested
+        if save:
+            try:
                 db = get_default_db()
                 session = db.create_session(type('Session', (), {
                     'name': f"Test {datetime.now().isoformat()}",
@@ -269,11 +330,23 @@ def test(
 
                 reading_id = db.create_reading(reading)
                 console.print(f"\n[green]✓ Saved as reading #{reading_id}[/green]")
-        else:
-            console.print("\n[yellow]⚠ No pitch detected in audio[/yellow]")
-            console.print("[dim]Try speaking closer to the microphone or increasing volume[/dim]")
+                log_session(session, "completed", duration=duration, readings=1)
+            except Exception as e:
+                logger.exception("Failed to save reading", exc=e)
+                raise wrap_exception(e, "FERN-300", {"operation": "save_reading"})
 
+    except FernError as e:
+        if e.severity == ErrorSeverity.WARNING:
+            display_error(e)
+            raise typer.Exit(0)
+        raise
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Recording cancelled[/yellow]")
+        raise typer.Exit(0)
     except Exception as e:
+        logger.exception("Test command failed", exc=e)
         console.print(f"\n[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
@@ -388,9 +461,11 @@ def trend(
 
         console.print(Align.center(table))
 
+    except FernError:
+        raise
     except Exception as e:
-        console.print(f"\n[red]Error: {e}[/red]")
-        raise typer.Exit(1)
+        logger.exception("Trend command failed", exc=e)
+        raise wrap_exception(e, "FERN-300", {"operation": "get_trend_data"})
 
 
 @app.command()
@@ -446,9 +521,11 @@ def sessions(
 
         console.print(Align.center(table))
 
+    except FernError:
+        raise
     except Exception as e:
-        console.print(f"\n[red]Error: {e}[/red]")
-        raise typer.Exit(1)
+        logger.exception("Sessions command failed", exc=e)
+        raise wrap_exception(e, "FERN-300", {"operation": "list_sessions"})
 
 
 @app.command()
@@ -471,8 +548,7 @@ def review(
         session = db.get_session(session_id)
 
         if not session:
-            console.print(f"\n[red]Session #{session_id} not found[/red]")
-            raise typer.Exit(1)
+            raise create_error("FERN-503", context={"session_id": session_id})
 
         readings = db.get_readings_for_session(session_id)
 
@@ -541,11 +617,13 @@ def review(
                 console.print(f"\n[green]✓ Exported to {json_path}[/green]")
 
             else:
-                console.print(f"\n[yellow]Unknown export format: {export}[/yellow]")
+                raise create_error("FERN-504", context={"format": export})
 
+    except FernError:
+        raise
     except Exception as e:
-        console.print(f"\n[red]Error: {e}[/red]")
-        raise typer.Exit(1)
+        logger.exception("Review command failed", exc=e)
+        raise wrap_exception(e, "FERN-300", {"operation": "get_session", "session_id": session_id})
 
 
 @app.command()
@@ -560,6 +638,10 @@ def export(
 
     format_map = {"csv": "CSV", "json": "JSON"}
     format_name = format_map.get(format, format.upper())
+
+    # Validate format
+    if format not in ("csv", "json"):
+        raise create_error("FERN-504", context={"format": format})
 
     console.print(Panel.fit(
         f"[bold green]📤 Export Data[/bold green]\n"
@@ -609,9 +691,15 @@ def export(
 
         console.print(f"\n[green]✓ Exported {len(filtered_readings)} readings to {output_path}[/green]")
 
+    except FernError:
+        raise
+    except PermissionError as e:
+        raise wrap_exception(e, "FERN-505", {"path": output_path, "operation": "write"})
+    except OSError as e:
+        raise wrap_exception(e, "FERN-505", {"path": output_path, "operation": "write"})
     except Exception as e:
-        console.print(f"\n[red]Error: {e}[/red]")
-        raise typer.Exit(1)
+        logger.exception("Export command failed", exc=e)
+        raise wrap_exception(e, "FERN-300", {"operation": "export"})
 
 
 @app.command()
@@ -685,9 +773,11 @@ def config_show():
         except Exception:
             pass
 
+    except FileNotFoundError:
+        raise create_error("FERN-400")
     except Exception as e:
-        console.print(f"\n[yellow]No configuration file found: {e}[/yellow]")
-        console.print("[dim]Use 'fern config set-target <min> <max>' to create one[/dim]")
+        logger.exception("Config show failed", exc=e)
+        raise wrap_exception(e, "FERN-401", {"operation": "load_config"})
 
 
 @app.command("config:set-target")
@@ -709,6 +799,10 @@ def config_set_target(
     ))
 
     try:
+        # Validate pitch range
+        if min_pitch >= max_pitch:
+            raise create_error("FERN-403", context={"min_pitch": min_pitch, "max_pitch": max_pitch})
+
         # Load existing config or create new one
         try:
             config = load_config(get_default_config_path())
@@ -734,9 +828,13 @@ def config_set_target(
             db.set_active_target(target_id)
             console.print(f"[green]✓ Also updated database target (ID: {target_id})[/green]")
 
+    except FernError:
+        raise
+    except PermissionError as e:
+        raise wrap_exception(e, "FERN-003", {"path": str(get_default_config_path()), "operation": "write"})
     except Exception as e:
-        console.print(f"\n[red]Error: {e}[/red]")
-        raise typer.Exit(1)
+        logger.exception("Config set-target failed", exc=e)
+        raise wrap_exception(e, "FERN-402", {"operation": "save_config"})
 
 
 @app.command()
@@ -766,7 +864,8 @@ def chart(
 
         if not filtered_readings:
             console.print("\n[yellow]No data available for the selected period[/yellow]")
-            return
+            console.print("[dim]Capture some audio first with 'fern test --save'[/dim]")
+            raise create_error("FERN-303")
 
         # Group readings by date for trend data
         trend_by_date = {}
@@ -874,10 +973,23 @@ def chart(
             console.print(f"\n[dim]Use --send flag to send data to Hammerspoon GUI[/dim]")
             console.print("[dim]Press Ctrl+Alt+Shift+C in Hammerspoon to view charts[/dim]")
 
+    except FernError:
+        raise
     except Exception as e:
+        logger.exception("Chart command failed", exc=e)
         console.print(f"\n[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
 
+def main():
+    """Main entry point with error handling."""
+    try:
+        app()
+    except FernError as e:
+        display_fatal_error(e)
+    except KeyboardInterrupt:
+        raise typer.Exit(0)
+
+
 if __name__ == "__main__":
-    app()
+    main()
