@@ -4,33 +4,33 @@
 
 Goal: Basic pitch detection from microphone
 
-- [ ] Set up UV project with pyproject.toml
-- [ ] Install core dependencies (sounddevice, librosa, praat-parselmouth, numpy)
-- [ ] Create basic pitch detection script (`scripts/test_pitch.py`)
+- [x] Set up UV project with pyproject.toml
+- [x] Install core dependencies (sounddevice, librosa, praat-parselmouth, numpy)
+- [x] Create basic pitch detection script (`scripts/test_pitch.py`)
   - Capture 5 seconds of audio from microphone
   - Extract fundamental frequency using praat-parselmouth
   - Print median pitch to console
-- [ ] Verify audio capture works on macOS
-- [ ] Add CLI entry point (`fern` command using Typer)
-- [ ] Create tests/ directory with initial test structure
+- [x] Verify audio capture works on macOS
+- [x] Add CLI entry point (`fern` command using Typer)
+- [x] Create tests/ directory with initial test structure
 
 ## Phase 2: Data Layer
 
-- [ ] Implement SQLite schema in `db.py`
+- [x] Implement SQLite schema in `db.py`
   - sessions table
   - readings table
   - targets table
   - config table
-- [ ] Create data models in `models.py`
-- [ ] Implement audio clip storage in `~/.fern/clips/`
-- [ ] Add rolling archive logic (keep 30 most recent clips)
+- [x] Create data models in `models.py`
+- [x] Implement audio clip storage in `~/.fern/clips/`
+- [x] Add rolling archive logic (keep 30 most recent clips)
 
 ## Phase 3: Core Analysis
 
-- [ ] Implement `capture.py` with callback-based audio capture
-- [ ] Implement `analysis.py` with pitch extraction
-- [ ] Implement resonance analysis using librosa
-- [ ] Create Session/Reading lifecycle management
+- [x] Implement `capture.py` with callback-based audio capture
+- [x] Implement `analysis.py` with pitch extraction
+- [x] Implement resonance analysis using librosa
+- [x] Create Session/Reading lifecycle management
 - [ ] Add basic CLI commands: `fern status`, `fern trend`
 
 ## Phase 4: Hammerspoon Integration
