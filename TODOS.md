@@ -65,11 +65,11 @@ Goal: Basic pitch detection from microphone
 
 ## Phase 7: Installation & Packaging
 
-- [ ] Create install script
-- [ ] Add Hammerspoon config setup instructions
-- [ ] Create Homebrew formula (optional)
-- [ ] Write comprehensive README documentation
-- [ ] Add LICENSE file
+- [x] Create install script
+- [x] Add Hammerspoon config setup instructions
+- [x] Create Homebrew formula (optional)
+- [x] Write comprehensive README documentation
+- [x] Add LICENSE file
 
 ## Phase 8: v1.0 Polish
 
