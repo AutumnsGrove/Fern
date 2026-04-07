@@ -214,7 +214,7 @@ function FernChartsCreateTrend(data, options)
             textSize = 10,
             textFont = "SF Mono",
             frame = {
-                x = +10,
+                x = 10,
                 y = chartY + chartH - 15,
                 w = 40,
                 h = 15

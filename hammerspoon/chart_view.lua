@@ -105,7 +105,7 @@ function FernChartViewCreateTrend(data, options)
         strokeColor = { red = 0.3, green = 0.5, blue = 0.4, alpha = 0.7 },
         strokeWidth = 2,
         roundedRectRadii = { xRadius = 12, yRadius = 12 }
-    end
+    }
 
     -- Title bar background
     canvas[#canvas + 1] = {

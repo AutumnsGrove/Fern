@@ -386,26 +386,7 @@ function FernCleanup()
     print("[Fern] Cleanup complete")
 end
 
--- Event bindings
-hs.urlregister.setShouldLaunchCallback(function(scheme, host, path)
-    return scheme == "fern"
-end)
-
 -- Initialize on load
 FernInit()
-
--- Cleanup on reload
-hs.audiodevice.watcher.set(function(device, event)
-    if event == "deviceRemoved" then
-        if state.isCapturing then
-            FernStopCapture()
-            hs.notify.new({
-                title = "Fern",
-                informativeText = "Audio device disconnected. Capture stopped.",
-                withdrawAfter = 5
-            }):send()
-        end
-    end
-end)
 
 print("[Fern] Configuration loaded")
